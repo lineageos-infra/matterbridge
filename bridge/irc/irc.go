@@ -139,7 +139,8 @@ func (b *Birc) JoinChannel(channel config.ChannelInfo) error {
 
 func (b *Birc) Send(msg config.Message) (string, error) {
 	// ignore delete messages
-	if msg.Event == config.EventMsgDelete {
+	if msg.Event == config.EventMsgDelete ||
+	   msg.ID != "" {
 		return "", nil
 	}
 
@@ -179,13 +180,13 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 	for i := range msgLines {
 		if len(b.Local) >= b.MessageQueue {
 			b.Log.Debugf("flooding, dropping message (queue at %d)", len(b.Local))
-			return "", nil
+			return "fake-id", nil
 		}
 
 		msg.Text = msgLines[i]
 		b.Local <- msg
 	}
-	return "", nil
+	return "fake-id", nil
 }
 
 func (b *Birc) doConnect() {
