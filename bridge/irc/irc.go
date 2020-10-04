@@ -1,12 +1,15 @@
 package birc
 
 import (
+	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +35,9 @@ type Birc struct {
 	FirstConnection, authDone                 bool
 	MessageDelay, MessageQueue, MessageLength int
 	channels                                  map[string]bool
+
+	PasteMinLines, PastePreviewLines   int
+	PasteDomain, PasteAPI, PasteAPIKey string
 
 	*bridge.Config
 }
@@ -59,6 +65,19 @@ func New(cfg *bridge.Config) bridge.Bridger {
 	} else {
 		b.MessageLength = b.GetInt("MessageLength")
 	}
+	if b.GetInt("PasteMinLines") == 0 {
+		b.PasteMinLines = 4
+	} else {
+		b.PasteMinLines = b.GetInt("PasteMinLines")
+	}
+	b.PastePreviewLines = b.GetInt("PastePreviewLines")
+	b.PasteDomain = b.GetString("PasteDomain")
+	if b.GetString("PasteAPI") == "" {
+		b.PasteAPI = "https://" + b.PasteDomain + "/api"
+	} else {
+		b.PasteAPI = b.GetString("PasteAPI")
+	}
+	b.PasteAPIKey = b.GetString("PasteAPIKey")
 	b.FirstConnection = true
 	return b
 }
@@ -137,10 +156,69 @@ func (b *Birc) JoinChannel(channel config.ChannelInfo) error {
 	return nil
 }
 
+func (b *Birc) createPaste(content string) string {
+	type pasteRequestJson struct {
+		Paste    string `json:"paste"`
+		Language string `json:"language"`
+		Domain   string `json:"domain"`
+		ApiKey   string `json:"api_key,omitempty"`
+	}
+
+	type pasteResponseJson struct {
+		Err   string `json:"error"`
+		Paste string `json:"paste"`
+	}
+
+	request := pasteRequestJson{
+		Paste:    content,
+		Language: "markdown",
+		Domain:   fmt.Sprintf("%s/raw", b.PasteDomain),
+	}
+
+	if b.PasteAPIKey != "" {
+		request.ApiKey = b.PasteAPIKey
+	}
+
+	body, err := json.Marshal(request)
+
+	if err != nil {
+		b.Log.Errorf("Error encoding JSON for paste: %s", err.Error())
+		return ""
+	}
+
+	resp, err := http.Post(fmt.Sprintf("%s/v1/paste", b.PasteAPI), "application/json", bytes.NewBuffer(body))
+
+	if err != nil {
+		b.Log.Errorf("Error requesting paste: %s", err.Error())
+		return ""
+	}
+
+	if resp.StatusCode != 200 {
+		b.Log.Errorf("Got non-200 error code when creating paste: %d", resp.StatusCode)
+		return ""
+	}
+
+	result := pasteResponseJson{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+
+	defer resp.Body.Close()
+
+	if err != nil {
+		b.Log.Errorf("Failed to decode paste response JSON: %s", err.Error())
+		return ""
+	}
+
+	if result.Err != "" {
+		b.Log.Errorf("Got error in paste response: %s", result.Err)
+		return ""
+	}
+	return result.Paste
+}
+
 func (b *Birc) Send(msg config.Message) (string, error) {
 	// ignore delete messages
 	if msg.Event == config.EventMsgDelete ||
-	   msg.ID != "" {
+		msg.ID != "" {
 		return "", nil
 	}
 
@@ -177,10 +255,24 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 	} else {
 		msgLines = helper.GetSubLines(msg.Text, 0, b.GetString("MessageClipped"))
 	}
+
+	originalText := msg.Text
+
 	for i := range msgLines {
 		if len(b.Local) >= b.MessageQueue {
 			b.Log.Debugf("flooding, dropping message (queue at %d)", len(b.Local))
 			return "fake-id", nil
+		}
+
+		if b.PasteDomain != "" && len(msgLines) >= b.PasteMinLines && i >= b.PastePreviewLines {
+			var link string
+			link = b.createPaste(originalText)
+
+			if link != "" {
+				msg.Text = "<message clipped: " + link + ">"
+				b.Local <- msg
+				return "fake-id", nil
+			}
 		}
 
 		msg.Text = msgLines[i]
