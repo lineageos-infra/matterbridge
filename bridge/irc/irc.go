@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,6 +36,7 @@ type Birc struct {
 	FirstConnection, authDone                 bool
 	MessageDelay, MessageQueue, MessageLength int
 	channels                                  map[string]bool
+	StripQuotes                               bool
 
 	PasteMinLines, PastePreviewLines   int
 	PasteDomain, PasteAPI, PasteAPIKey string
@@ -65,6 +67,7 @@ func New(cfg *bridge.Config) bridge.Bridger {
 	} else {
 		b.MessageLength = b.GetInt("MessageLength")
 	}
+	b.StripQuotes = b.GetBool("StripQuotes")
 	if b.GetInt("PasteMinLines") == 0 {
 		b.PasteMinLines = 4
 	} else {
@@ -251,6 +254,11 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 	}
 
 	originalText := msg.Text
+
+	if b.StripQuotes {
+		m1 := regexp.MustCompile(`(?ms)^> .*?^`)
+		msg.Text = m1.ReplaceAllString(msg.Text, "")
+	}
 
 	if b.GetBool("MessageSplit") {
 		msgLines = helper.GetSubLines(msg.Text, b.MessageLength, b.GetString("MessageClipped"))
