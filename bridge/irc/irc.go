@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,6 +47,7 @@ type Birc struct {
 	RelayMsgSep                               string                  // current setting for the Relaymsg separator(s)
 	CasemapFailures                           int                     // Count of casemapping errors
 	RelayMsgFailures                          int                     // Count of general relaymsg errors
+	StripQuotes                               bool
 
 	PasteMinLines, PastePreviewLines   int
 	PasteDomain, PasteAPI, PasteAPIKey string
@@ -96,6 +98,8 @@ func New(cfg *bridge.Config) bridge.Bridger {
 	if !b.IsKeySet("UseRelayFallback") {
 		b.SetBool("UseRelayFallback", true)
 	}
+
+	b.StripQuotes = b.GetBool("StripQuotes")
 
 	if b.GetInt("PasteMinLines") == 0 {
 		b.PasteMinLines = 4
@@ -321,6 +325,12 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 	// For now, we'll repurpose the MessageSplit setting to hand off the whole message to girc when set to false.
 	if b.GetBool("MessageSplit") {
 		originalText := msg.Text
+
+		if b.StripQuotes {
+			m1 := regexp.MustCompile(`(?ms)^> .*?^`)
+			msg.Text = m1.ReplaceAllString(msg.Text, "")
+		}
+
 		msgLines := helper.GetSubLinesWords(msg.Text, b.MessageLength-prefix, b.GetString("MessageClipped"))
 		for i := range msgLines {
 			if len(b.Local) >= b.MessageQueue {
