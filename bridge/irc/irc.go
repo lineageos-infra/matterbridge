@@ -265,6 +265,18 @@ func (b *Birc) createPaste(content string) string {
 	return result.Paste
 }
 
+func (b *Birc) RemoveEmpty(lines []string) []string {
+	var out []string
+
+	for _, l := range lines {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+
+	return out
+}
+
 func (b *Birc) Send(msg config.Message) (string, error) {
 	// Note: charset handling for an irc destination bridge has been moved to doSend()
 	// ignore delete messages
@@ -351,6 +363,7 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 		}
 
 		msgLines := helper.GetSubLinesWords(msg.Text, b.MessageLength-prefix, b.GetString("MessageClipped"))
+		msgLines = b.RemoveEmpty(msgLines)
 		for i := range msgLines {
 			if len(b.Local) >= b.MessageQueue {
 				b.Log.Debugf("flooding, dropping message (queue at %d)", len(b.Local))
