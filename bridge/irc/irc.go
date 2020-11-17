@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -252,6 +253,11 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 		msg.Text = stripmd.Strip(msg.Text)
 	}
 
+	if b.StripQuotes {
+		m1 := regexp.MustCompile(`(?ms)^> .*?^`)
+		msg.Text = m1.ReplaceAllString(msg.Text, "")
+	}
+
 	if b.GetBool("MessageSplit") {
 		msgLines = helper.GetSubLines(msg.Text, b.MessageLength, b.GetString("MessageClipped"))
 	} else {
@@ -277,10 +283,8 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 			}
 		}
 
-		if !b.StripQuotes || !strings.HasPrefix(msgLines[i], "> ") {
-			msg.Text = msgLines[i]
-			b.Local <- msg
-		}
+		msg.Text = msgLines[i]
+		b.Local <- msg
 	}
 	return "fake-id", nil
 }
