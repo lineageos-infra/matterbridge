@@ -40,7 +40,7 @@ type Birc struct {
 
 	PasteMinLines, PastePreviewLines   int
 	PasteDomain, PasteAPI, PasteAPIKey string
-	PasteCodeblocks                    bool
+	PasteCodeblocks, PasteLongMessages bool
 
 	*bridge.Config
 }
@@ -83,6 +83,7 @@ func New(cfg *bridge.Config) bridge.Bridger {
 	}
 	b.PasteAPIKey = b.GetString("PasteAPIKey")
 	b.PasteCodeblocks = b.GetBool("PasteCodeblocks")
+	b.PasteLongMessages = b.GetBool("PasteLongMessages")
 	b.FirstConnection = true
 	return b
 }
@@ -305,7 +306,8 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 			return "fake-id", nil
 		}
 
-		if b.PasteDomain != "" && len(msgLines) >= b.PasteMinLines && i >= b.PastePreviewLines {
+		if b.PasteDomain != "" && b.PasteLongMessages &&
+			len(msgLines) >= b.PasteMinLines && i >= b.PastePreviewLines {
 			var link string
 			link = b.createPaste(originalText)
 
