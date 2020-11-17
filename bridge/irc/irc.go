@@ -51,6 +51,7 @@ type Birc struct {
 
 	PasteMinLines, PastePreviewLines   int
 	PasteDomain, PasteAPI, PasteAPIKey string
+	PasteCodeblocks                    bool
 
 	*bridge.Config
 }
@@ -117,6 +118,7 @@ func New(cfg *bridge.Config) bridge.Bridger {
 	}
 
 	b.PasteAPIKey = b.GetString("PasteAPIKey")
+	b.PasteCodeblocks = b.GetBool("PasteCodeblocks")
 
 	b.FirstConnection = true
 
@@ -329,6 +331,23 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 		if b.StripQuotes {
 			m1 := regexp.MustCompile(`(?ms)^> .*?^`)
 			msg.Text = m1.ReplaceAllString(msg.Text, "")
+		}
+
+		if b.PasteDomain != "" && b.PasteCodeblocks {
+			m1 := regexp.MustCompile("(?ms)```(.*?)```")
+
+			for true {
+				loc := m1.FindStringIndex(msg.Text)
+
+				if loc == nil {
+					break
+				}
+
+				substr := msg.Text[loc[0]:loc[1]]
+				link := b.createPaste(substr)
+
+				msg.Text = fmt.Sprintf("%s\n<codeblock clipped: %s>\n%s", msg.Text[0:loc[0]], link, msg.Text[loc[1]:])
+			}
 		}
 
 		msgLines := helper.GetSubLinesWords(msg.Text, b.MessageLength-prefix, b.GetString("MessageClipped"))
