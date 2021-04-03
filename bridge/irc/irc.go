@@ -305,7 +305,7 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 		}
 
 		if b.PasteDomain != "" && b.PasteLongMessages &&
-		   len(msgLines) >= b.PasteMinLines && i >= b.PastePreviewLines {
+			len(msgLines) >= b.PasteMinLines && i >= b.PastePreviewLines {
 			var link string
 			link = b.createPaste(originalText)
 
