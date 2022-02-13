@@ -207,6 +207,8 @@ func (b *Birc) createPaste(content string) string {
 	result := pasteResponseJson{}
 	err = json.NewDecoder(resp.Body).Decode(&result)
 
+	defer resp.Body.Close()
+
 	if err != nil {
 		b.Log.Errorf("Failed to decode paste response JSON: %s", err.Error())
 		return ""
