@@ -1,12 +1,16 @@
 package birc
 
 import (
+	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/crc32"
 	"io/ioutil"
 	"net"
+	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +36,11 @@ type Birc struct {
 	FirstConnection, authDone                 bool
 	MessageDelay, MessageQueue, MessageLength int
 	channels                                  map[string]bool
+	StripQuotes                               bool
+
+	PasteMinLines, PastePreviewLines   int
+	PasteDomain, PasteAPI, PasteAPIKey string
+	PasteCodeblocks, PasteLongMessages bool
 
 	*bridge.Config
 }
@@ -59,6 +68,22 @@ func New(cfg *bridge.Config) bridge.Bridger {
 	} else {
 		b.MessageLength = b.GetInt("MessageLength")
 	}
+	b.StripQuotes = b.GetBool("StripQuotes")
+	if b.GetInt("PasteMinLines") == 0 {
+		b.PasteMinLines = 4
+	} else {
+		b.PasteMinLines = b.GetInt("PasteMinLines")
+	}
+	b.PastePreviewLines = b.GetInt("PastePreviewLines")
+	b.PasteDomain = b.GetString("PasteDomain")
+	if b.GetString("PasteAPI") == "" {
+		b.PasteAPI = "https://" + b.PasteDomain + "/api"
+	} else {
+		b.PasteAPI = b.GetString("PasteAPI")
+	}
+	b.PasteAPIKey = b.GetString("PasteAPIKey")
+	b.PasteCodeblocks = b.GetBool("PasteCodeblocks")
+	b.PasteLongMessages = b.GetBool("PasteLongMessages")
 	b.FirstConnection = true
 	return b
 }
@@ -137,9 +162,79 @@ func (b *Birc) JoinChannel(channel config.ChannelInfo) error {
 	return nil
 }
 
+func (b *Birc) createPaste(content string) string {
+	type pasteRequestJson struct {
+		Paste    string `json:"paste"`
+		Language string `json:"language"`
+		Domain   string `json:"domain"`
+		ApiKey   string `json:"api_key,omitempty"`
+	}
+
+	type pasteResponseJson struct {
+		Err   string `json:"error"`
+		Paste string `json:"paste"`
+	}
+
+	request := pasteRequestJson{
+		Paste:    content,
+		Language: "markdown",
+		Domain:   fmt.Sprintf("%s/raw", b.PasteDomain),
+	}
+
+	if b.PasteAPIKey != "" {
+		request.ApiKey = b.PasteAPIKey
+	}
+
+	body, err := json.Marshal(request)
+
+	if err != nil {
+		b.Log.Errorf("Error encoding JSON for paste: %s", err.Error())
+		return ""
+	}
+
+	resp, err := http.Post(fmt.Sprintf("%s/v1/paste", b.PasteAPI), "application/json", bytes.NewBuffer(body))
+
+	if err != nil {
+		b.Log.Errorf("Error requesting paste: %s", err.Error())
+		return ""
+	}
+
+	if resp.StatusCode != 200 {
+		b.Log.Errorf("Got non-200 error code when creating paste: %d", resp.StatusCode)
+		return ""
+	}
+
+	result := pasteResponseJson{}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+
+	if err != nil {
+		b.Log.Errorf("Failed to decode paste response JSON: %s", err.Error())
+		return ""
+	}
+
+	if result.Err != "" {
+		b.Log.Errorf("Got error in paste response: %s", result.Err)
+		return ""
+	}
+	return result.Paste
+}
+
+func (b *Birc) RemoveEmpty(lines []string) []string {
+	var out []string
+
+	for _, l := range lines {
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+
+	return out
+}
+
 func (b *Birc) Send(msg config.Message) (string, error) {
 	// ignore delete messages
-	if msg.Event == config.EventMsgDelete {
+	if msg.Event == config.EventMsgDelete ||
+		msg.ID != "" {
 		return "", nil
 	}
 
@@ -171,21 +266,60 @@ func (b *Birc) Send(msg config.Message) (string, error) {
 		msg.Text = stripmd.Strip(msg.Text)
 	}
 
+	originalText := msg.Text
+
+	if b.StripQuotes {
+		m1 := regexp.MustCompile(`(?ms)^> .*?^`)
+		msg.Text = m1.ReplaceAllString(msg.Text, "")
+	}
+
+	if b.PasteDomain != "" && b.PasteCodeblocks {
+		m1 := regexp.MustCompile("(?ms)```(.*?)```")
+
+		for true {
+			loc := m1.FindStringIndex(msg.Text)
+
+			if loc == nil {
+				break
+			}
+
+			substr := msg.Text[loc[0]:loc[1]]
+			link := b.createPaste(substr)
+
+			msg.Text = fmt.Sprintf("%s\n<codeblock clipped: %s>\n%s", msg.Text[0:loc[0]], link, msg.Text[loc[1]:])
+		}
+	}
+
 	if b.GetBool("MessageSplit") {
 		msgLines = helper.GetSubLines(msg.Text, b.MessageLength, b.GetString("MessageClipped"))
 	} else {
 		msgLines = helper.GetSubLines(msg.Text, 0, b.GetString("MessageClipped"))
 	}
+
+	msgLines = b.RemoveEmpty(msgLines)
+
 	for i := range msgLines {
 		if len(b.Local) >= b.MessageQueue {
 			b.Log.Debugf("flooding, dropping message (queue at %d)", len(b.Local))
-			return "", nil
+			return "fake-id", nil
+		}
+
+		if b.PasteDomain != "" && b.PasteLongMessages &&
+			len(msgLines) >= b.PasteMinLines && i >= b.PastePreviewLines {
+			var link string
+			link = b.createPaste(originalText)
+
+			if link != "" {
+				msg.Text = "<message clipped: " + link + ">"
+				b.Local <- msg
+				return "fake-id", nil
+			}
 		}
 
 		msg.Text = msgLines[i]
 		b.Local <- msg
 	}
-	return "", nil
+	return "fake-id", nil
 }
 
 func (b *Birc) doConnect() {
