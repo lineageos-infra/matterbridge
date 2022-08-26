@@ -120,6 +120,12 @@ func (b *Bdiscord) getChannelName(id string) string {
 	b.channelsMutex.RLock()
 	defer b.channelsMutex.RUnlock()
 
+	for _, channel := range b.channels {
+		if channel.ID == id {
+			return b.getCategoryChannelName(channel.Name, channel.ParentID)
+		}
+	}
+
 	for _, c := range b.channelInfoMap {
 		if c.Name == "ID:"+id {
 			// if we have ID: specified in our gateway configuration return this
@@ -127,11 +133,6 @@ func (b *Bdiscord) getChannelName(id string) string {
 		}
 	}
 
-	for _, channel := range b.channels {
-		if channel.ID == id {
-			return b.getCategoryChannelName(channel.Name, channel.ParentID)
-		}
-	}
 	return ""
 }
 
