@@ -116,6 +116,18 @@ func (b *Bdiscord) getCategoryChannelID(name string) string {
 	return ""
 }
 
+func (b *Bdiscord) getPrettyChannelName(id string) string {
+	b.channelsMutex.RLock()
+	defer b.channelsMutex.RUnlock()
+
+	for _, channel := range b.channels {
+		if channel.ID == id {
+			return b.getCategoryChannelName(channel.Name, channel.ParentID)
+		}
+	}
+	return "unknownchannel"
+}
+
 func (b *Bdiscord) getChannelName(id string) string {
 	b.channelsMutex.RLock()
 	defer b.channelsMutex.RUnlock()
@@ -167,7 +179,7 @@ var (
 func (b *Bdiscord) replaceChannelMentions(text string) string {
 	replaceChannelMentionFunc := func(match string) string {
 		channelID := match[2 : len(match)-1]
-		channelName := b.getChannelName(channelID)
+		channelName := b.getPrettyChannelName(channelID)
 
 		// If we don't have the channel refresh our list.
 		if channelName == "" {
@@ -176,7 +188,7 @@ func (b *Bdiscord) replaceChannelMentions(text string) string {
 			if err != nil {
 				return "#unknownchannel"
 			}
-			channelName = b.getChannelName(channelID)
+			channelName = b.getPrettyChannelName(channelID)
 		}
 		return "#" + channelName
 	}
