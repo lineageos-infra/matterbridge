@@ -33,36 +33,22 @@ func (b *Bdiscord) getAllowedMentions() *discordgo.MessageAllowedMentions {
 	}
 }
 
-func getGlobalNick(user *discordgo.User) string {
-	// Return the display name, if set.
-	if user.GlobalName != "" {
-		return user.GlobalName
-	}
-	// Otherwise, return the username.
-	return user.Username
-}
-
 func (b *Bdiscord) getNick(user *discordgo.User, guildID string) string {
 	b.membersMutex.RLock()
 	defer b.membersMutex.RUnlock()
 
-	if member, ok := b.userMemberMap[user.ID]; ok {
-		if member.Nick != "" {
-			// Only return if nick is set.
-			return member.Nick
-		}
-		// Otherwise return username.
-		return getGlobalNick(user)
+	if _, ok := b.userMemberMap[user.ID]; ok {
+		return user.Username
 	}
 
 	// If we didn't find nick, search for it.
 	member, err := b.c.GuildMember(guildID, user.ID)
 	if err != nil {
 		b.Log.Warnf("Failed to fetch information for member %#v on guild %#v: %s", user, guildID, err)
-		return getGlobalNick(user)
+		return user.Username
 	} else if member == nil {
 		b.Log.Warnf("Got no information for member %#v", user)
-		return getGlobalNick(user)
+		return user.Username
 	}
 	b.userMemberMap[user.ID] = member
 	b.nickMemberMap[member.User.Username] = member
@@ -70,7 +56,7 @@ func (b *Bdiscord) getNick(user *discordgo.User, guildID string) string {
 		b.nickMemberMap[member.Nick] = member
 		return member.Nick
 	}
-	return getGlobalNick(user)
+	return user.Username
 }
 
 func (b *Bdiscord) getGuildMemberByNick(nick string) (*discordgo.Member, error) {
