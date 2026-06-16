@@ -148,6 +148,13 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 
 	rmsg := config.Message{Account: b.Account, Avatar: "https://cdn.discordapp.com/avatars/" + m.Author.ID + "/" + m.Author.Avatar + ".jpg", UserID: "@" + m.Author.Username, ID: m.ID, Extra: make(map[string][]any)} // here we use .jpg over .webp for wider support across bridges and clients in general. discord automatically converts as needed anyhow.
 
+	// add the url of the attachments to content
+	if len(m.Attachments) > 0 {
+		for _, attach := range m.Attachments {
+			m.Content = m.Content + "\n" + attach.URL
+		}
+	}
+
 	b.Log.Debugf("== Receiving event %#v", m.Message)
 
 	if m.Content != "" {
@@ -202,41 +209,11 @@ func (b *Bdiscord) messageCreate(s *discordgo.Session, m *discordgo.MessageCreat
 		return
 	}
 
-	// if no attachments, send the message as-is
-	if len(m.Attachments) == 0 {
-		b.Log.Debugf("<= Sending message from %s on %s to gateway", m.Author.Username, b.Account)
-		b.Log.Debugf("<= Message is %#v", rmsg)
+	// send the message
+	b.Log.Debugf("<= Sending message from %s on %s to gateway", m.Author.Username, b.Account)
+	b.Log.Debugf("<= Message is %#v", rmsg)
 
-		b.Remote <- rmsg
-
-		return
-	}
-
-	// We process attachments last, after all pre-processing is done
-	// Perform the operations in the background, so we can process other
-	// messages while we download the attachments.
-	go func() {
-		count := 0
-		for _, attach := range m.Attachments {
-			err := b.AddAttachmentFromURL(&rmsg, attach.Filename, attach.ID, "", attach.URL)
-			if err != nil {
-				b.Log.WithError(err).Warnf("Failed to download attachment %s", attach.Filename)
-				continue
-			}
-
-			count += 1
-		}
-
-		if rmsg.Text == "" && count == 0 {
-			b.Log.Warnf("Skipping message because there is no text and file uploads all failed")
-			return
-		}
-
-		b.Log.Debugf("<= Sending message attachments from %s on %s to gateway", m.Author.Username, b.Account)
-		b.Log.Debugf("<= Message is %#v", rmsg)
-
-		b.Remote <- rmsg
-	}()
+	b.Remote <- rmsg
 }
 
 func (b *Bdiscord) memberUpdate(s *discordgo.Session, m *discordgo.GuildMemberUpdate) {
